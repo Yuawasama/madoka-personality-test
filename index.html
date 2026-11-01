@@ -192,6 +192,7 @@ body.theme-anim, body.theme-anim * {
   transition:all .2s;
 }
 .btn-ghost:active { background:var(--bg2); }
+.btn-ghost[hidden] { display:none; }
 .btn-ghost:disabled { opacity:.55; border-color:var(--bg2); color:var(--sub); }
 
 /* ===== 结果 ===== */
@@ -453,9 +454,13 @@ body.theme-anim, body.theme-anim * {
 .iv-bar {
   flex: 0 0 auto;
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 18px calc(14px + env(safe-area-inset-top, 0px));
+  padding: 14px 18px;
   padding-top: calc(14px + env(safe-area-inset-top, 0px));
   color: #fff;
+  background: rgba(20,14,18,.92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255,255,255,.12);
+  position: relative; z-index: 2;
 }
 .iv-tip { font-size: 13px; letter-spacing: .04em; opacity: .92; }
 .iv-close {
@@ -467,7 +472,7 @@ body.theme-anim, body.theme-anim * {
 
 .iv-scroll {
   flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  padding: 0 14px;
+  padding: 14px;
 }
 .iv-img {
   display: block; width: 100%; height: auto;
@@ -500,6 +505,7 @@ body.theme-anim, body.theme-anim * {
     <h1 class="cover-title">你和哪个<br><em>魔法少女</em>最像</h1>
     <p class="cover-sub">基于大五人格模型的 24 题测评<br>约 3 分钟，没有对错，凭第一直觉作答</p>
     <button class="btn-primary" id="btn-start">开始测试</button>
+    <button class="btn-ghost" id="btn-resume" hidden>返回上次测试结果</button>
     <p class="cover-note">结果仅供娱乐与自我了解，不构成心理诊断</p>
   </div>
 </section>
@@ -1211,6 +1217,7 @@ if (typeof module !== 'undefined') {
     if (state.locked) return;
     const q = QUESTIONS[state.idx];
     state.answers[q.id] = v;
+    saveProgress();
 
     // 视觉反馈
     el.options.querySelectorAll('.opt').forEach(btn => {
@@ -1239,6 +1246,8 @@ if (typeof module !== 'undefined') {
 
   // ---------- 出结果 ----------
   function finish() {
+    state.done = true;
+    saveProgress();
     const scores = calcScores(state.answers);
     const { persona, similarity, ranking } = matchPersona(scores);
 
@@ -1476,11 +1485,52 @@ if (typeof module !== 'undefined') {
     }
   }
 
+  // ---------- 进度记忆（localStorage） ----------
+  const SAVE_KEY = 'madoka_test_progress_v1';
+
+  function saveProgress() {
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify({
+        answers: state.answers,
+        idx: state.idx,
+        done: state.done === true,
+        ts: Date.now()
+      }));
+    } catch (e) { /* 隐私模式忽略 */ }
+  }
+
+  function loadProgress() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      if (!d || typeof d !== 'object') return null;
+      return d;
+    } catch (e) { return null; }
+  }
+
+  function clearProgress() {
+    try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+  }
+
+  // 恢复上次结果
+  function resumeLast() {
+    const d = loadProgress();
+    if (!d || !d.done || !d.answers) return false;
+    state.answers = d.answers;
+    state.idx = QUESTIONS.length - 1;
+    state.done = true;
+    finish();
+    return true;
+  }
+
   // ---------- 重置 ----------
   function reset() {
     state.idx = 0;
     state.answers = {};
     state.locked = false;
+    state.done = false;
+    clearProgress();
     applyTheme(DEFAULT_THEME, true);
     renderQuestion();
     show('cover');
@@ -1490,9 +1540,17 @@ if (typeof module !== 'undefined') {
   el.btnStart.addEventListener('click', () => {
     state.idx = 0;
     state.answers = {};
+    state.done = false;
+    clearProgress();
     renderQuestion();
     show('quiz');
   });
+
+  // 返回上次结果
+  const btnResume = $('#btn-resume');
+  if (btnResume) {
+    btnResume.addEventListener('click', () => { resumeLast(); });
+  }
 
   el.options.addEventListener('click', (e) => {
     const btn = e.target.closest('.opt');
@@ -1523,6 +1581,13 @@ if (typeof module !== 'undefined') {
   // ---------- 初始化 ----------
   applyTheme(DEFAULT_THEME, false);
   el.qTotal.textContent = QUESTIONS.length;
+
+  // 有上次结果就显示「返回上次测试结果」
+  (function () {
+    const d = loadProgress();
+    const btn = $('#btn-resume');
+    if (btn && d && d.done) btn.hidden = false;
+  })();
 
 })();
 
@@ -1833,11 +1898,9 @@ if (typeof module !== 'undefined') {
       ctx.drawImage(tmp, 0, 0);
     }
 
-    // 导出：优先调系统分享面板（内含「存储图像」，一步存进相册）
-    canvas.toBlob(blob => {
-      const url = URL.createObjectURL(blob);
-      tryShareOrView(blob, url, name);
-    }, 'image/png');
+    // 导出：data URL 优先（微信/QQ 内置浏览器只认它）
+    const dataUrl = canvas.toDataURL('image/png');
+    saveImageSmart(dataUrl, name);
   };
 })();
 
@@ -1886,9 +1949,15 @@ function showImageViewer(url, name) {
 
   const img = box.querySelector('.iv-img');
   const dl = box.querySelector('.iv-dl');
+  const foot = box.querySelector('.iv-foot');
   img.src = url;
   dl.href = url;
   dl.download = '小圆人格测试_' + (name || '结果') + '.png';
+
+  // 微信/QQ 内置浏览器里 download 属性无效，藏掉免得误导
+  const ua = navigator.userAgent;
+  const inApp = /MicroMessenger/i.test(ua) || /\sQQ/i.test(ua) || /QQBrowser/i.test(ua);
+  if (foot) foot.style.display = inApp ? 'none' : '';
 
   document.body.style.overflow = 'hidden';
   requestAnimationFrame(() => box.classList.add('show'));
@@ -1896,32 +1965,52 @@ function showImageViewer(url, name) {
 window.showImageViewer = showImageViewer;
 
 /* ==========================================================
-   存图策略：系统分享面板 → 长按存图 → 下载
+   存图策略（按微信/QQ/普通浏览器的实际兼容性排序）
+   1) data URL + a[download]  —— 普通浏览器直接存相册
+   2) 分享面板（files）      —— 部分安卓浏览器
+   3) 全屏看图，长按保存      —— 微信/QQ 内置浏览器的唯一可行路
    ========================================================== */
-function tryShareOrView(blob, url, name) {
-  const file = new File([blob], '小圆人格测试_' + name + '.png', { type: 'image/png' });
+function saveImageSmart(dataUrl, name) {
+  const fileName = '小圆人格测试_' + name + '.png';
+  const ua = navigator.userAgent;
+  const isWeChat = /MicroMessenger/i.test(ua);
+  const isQQ = /\sQQ/i.test(ua) || /QQBrowser/i.test(ua);
 
-  // 1) Web Share API 支持分享文件 → 调起系统面板，「存储图像」一步到位
-  if (typeof navigator.share === 'function' &&
-      navigator.canShare && navigator.canShare({ files: [file] })) {
-    navigator.share({
-      files: [file],
-      title: '魔法少女小圆 · 人格测试',
-      text: '我和' + name + '最像 —— 你呢？'
-    }).then(() => {
-      // 分享/保存成功，静默结束
-    }).catch((err) => {
-      // 用户取消不算失败；真出错才降级到看图器
-      if (err && err.name === 'AbortError') return;
-      showImageViewer(url, name);
-    });
+  // 微信/QQ 内置浏览器：download 属性无效，直接给看图器让用户长按
+  if (isWeChat || isQQ) {
+    showImageViewer(dataUrl, name);
     return;
   }
 
-  // 2) 不支持分享文件 → 全屏看图，长按保存
-  showImageViewer(url, name);
+  // 普通浏览器：先试 a[download] 直接下载
+  try {
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return;
+  } catch (e) { /* 走下一步 */ }
+
+  // 再试分享面板
+  try {
+    const bin = atob(dataUrl.split(',')[1]);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    const file = new File([arr], fileName, { type: 'image/png' });
+    if (typeof navigator.share === 'function' &&
+        navigator.canShare && navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file], title: '魔法少女小圆 · 人格测试' })
+        .catch(() => showImageViewer(dataUrl, name));
+      return;
+    }
+  } catch (e) { /* 走下一步 */ }
+
+  // 兜底：看图器长按
+  showImageViewer(dataUrl, name);
 }
-window.tryShareOrView = tryShareOrView;
+window.saveImageSmart = saveImageSmart;
 
 </script>
 </body>
