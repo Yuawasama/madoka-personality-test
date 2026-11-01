@@ -571,7 +571,7 @@ body.theme-anim, body.theme-anim * {
   </div>
 
   <div class="result-actions">
-    <button class="btn-primary" id="btn-save">保存结果长图</button>
+    <button class="btn-primary" id="btn-save">保存结果到相册</button>
     <button class="btn-ghost" id="btn-share">分享文字</button>
     <button class="btn-ghost" id="btn-retry">再测一次</button>
   </div>
@@ -1833,10 +1833,10 @@ if (typeof module !== 'undefined') {
       ctx.drawImage(tmp, 0, 0);
     }
 
-    // 导出：全屏看图，长按即可保存到相册
+    // 导出：优先调系统分享面板（内含「存储图像」，一步存进相册）
     canvas.toBlob(blob => {
       const url = URL.createObjectURL(blob);
-      showImageViewer(url, name);
+      tryShareOrView(blob, url, name);
     }, 'image/png');
   };
 })();
@@ -1894,6 +1894,34 @@ function showImageViewer(url, name) {
   requestAnimationFrame(() => box.classList.add('show'));
 }
 window.showImageViewer = showImageViewer;
+
+/* ==========================================================
+   存图策略：系统分享面板 → 长按存图 → 下载
+   ========================================================== */
+function tryShareOrView(blob, url, name) {
+  const file = new File([blob], '小圆人格测试_' + name + '.png', { type: 'image/png' });
+
+  // 1) Web Share API 支持分享文件 → 调起系统面板，「存储图像」一步到位
+  if (typeof navigator.share === 'function' &&
+      navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({
+      files: [file],
+      title: '魔法少女小圆 · 人格测试',
+      text: '我和' + name + '最像 —— 你呢？'
+    }).then(() => {
+      // 分享/保存成功，静默结束
+    }).catch((err) => {
+      // 用户取消不算失败；真出错才降级到看图器
+      if (err && err.name === 'AbortError') return;
+      showImageViewer(url, name);
+    });
+    return;
+  }
+
+  // 2) 不支持分享文件 → 全屏看图，长按保存
+  showImageViewer(url, name);
+}
+window.tryShareOrView = tryShareOrView;
 
 </script>
 </body>
