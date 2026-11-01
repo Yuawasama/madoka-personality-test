@@ -440,6 +440,52 @@ body.theme-anim, body.theme-anim * {
 }
 .qr-close:active { transform:scale(.96); }
 
+/* ---------- 结果图查看器 ---------- */
+.img-viewer {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; flex-direction: column;
+  background: rgba(24, 16, 22, .96);
+  opacity: 0; pointer-events: none;
+  transition: opacity .22s ease;
+}
+.img-viewer.show { opacity: 1; pointer-events: auto; }
+
+.iv-bar {
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px calc(14px + env(safe-area-inset-top, 0px));
+  padding-top: calc(14px + env(safe-area-inset-top, 0px));
+  color: #fff;
+}
+.iv-tip { font-size: 13px; letter-spacing: .04em; opacity: .92; }
+.iv-close {
+  border: 1px solid rgba(255,255,255,.38); background: transparent;
+  color: #fff; font-size: 13px; font-family: inherit;
+  padding: 6px 16px; border-radius: 999px; cursor: pointer;
+}
+.iv-close:active { background: rgba(255,255,255,.16); }
+
+.iv-scroll {
+  flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 0 14px;
+}
+.iv-img {
+  display: block; width: 100%; height: auto;
+  border-radius: 12px;
+  -webkit-touch-callout: default;   /* 允许长按菜单 */
+  user-select: auto;
+}
+
+.iv-foot {
+  flex: 0 0 auto; text-align: center;
+  padding: 12px 18px calc(16px + env(safe-area-inset-bottom, 0px));
+}
+.iv-dl {
+  display: inline-block; text-decoration: none;
+  color: #2e2430; background: #fff;
+  font-size: 14px; padding: 10px 34px; border-radius: 999px;
+}
+
 </style>
 </head>
 <body>
@@ -1785,16 +1831,10 @@ if (typeof module !== 'undefined') {
       ctx.drawImage(tmp, 0, 0);
     }
 
-    // 导出
+    // 导出：全屏看图，长按即可保存到相册
     canvas.toBlob(blob => {
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = '小圆人格测试_' + name + '.png';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 3000);
+      showImageViewer(url, name);
     }, 'image/png');
   };
 })();
@@ -1808,6 +1848,50 @@ if (typeof module !== 'undefined') {
     });
   }
 })();
+
+/* ==========================================================
+   结果图查看器 —— 长按保存到相册（手机端最顺手的存图方式）
+   ========================================================== */
+function showImageViewer(url, name) {
+  let box = document.getElementById('img-viewer');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'img-viewer';
+    box.className = 'img-viewer';
+    box.innerHTML =
+      '<div class="iv-bar">' +
+        '<span class="iv-tip">长按图片 → 保存到相册</span>' +
+        '<button class="iv-close" type="button">关闭</button>' +
+      '</div>' +
+      '<div class="iv-scroll"><img class="iv-img" alt="人格测试结果"></div>' +
+      '<div class="iv-foot">' +
+        '<a class="iv-dl" download>下载图片</a>' +
+      '</div>';
+    document.body.appendChild(box);
+
+    box.querySelector('.iv-close').addEventListener('click', () => {
+      box.classList.remove('show');
+      document.body.style.overflow = '';
+    });
+    // 点空白处也关
+    box.querySelector('.iv-scroll').addEventListener('click', (e) => {
+      if (e.target.classList.contains('iv-scroll')) {
+        box.classList.remove('show');
+        document.body.style.overflow = '';
+      }
+    });
+  }
+
+  const img = box.querySelector('.iv-img');
+  const dl = box.querySelector('.iv-dl');
+  img.src = url;
+  dl.href = url;
+  dl.download = '小圆人格测试_' + (name || '结果') + '.png';
+
+  document.body.style.overflow = 'hidden';
+  requestAnimationFrame(() => box.classList.add('show'));
+}
+window.showImageViewer = showImageViewer;
 
 </script>
 </body>
